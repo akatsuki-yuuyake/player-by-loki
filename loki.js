@@ -284,6 +284,28 @@
     return out;
   }
 
+  /** страница полного поиска сайта: карточки результатов и есть ли следующая страница */
+  function parseFullSearch(html) {
+    var out = [];
+    var parts = String(html).split('<div class="b-content__inline_item"');
+    for (var i = 1; i < parts.length; i++) {
+      var p = parts[i];
+      var url = /data-url="([^"]+)"/.exec(p);
+      var link = /<div class="b-content__inline_item-link">\s*<a href="([^"]+)">([\s\S]*?)<\/a>\s*<div>([\s\S]*?)<\/div>/.exec(p);
+      if (!url && !link) continue;
+      var type = /<i class="entity">([^<]*)<\/i>/.exec(p);
+      var img = /<img src="([^"]+)"/.exec(p);
+      out.push({
+        url: url ? url[1] : link[1],
+        title: link ? unescapeHtml(link[2]).trim() : '',
+        info: link ? unescapeHtml(link[3]).trim() : '',
+        type: type ? unescapeHtml(type[1]).trim() : '',
+        poster: img ? img[1] : ''
+      });
+    }
+    return { items: out, hasNext: /<a [^>]*>\s*<span class="b-navigation__next/.test(html) };
+  }
+
   function parseMoviePage(html) {
     var info = { series: false };
     var m = /initCDNSeriesEvents\(\s*(\d+)\s*,\s*(\d+)/.exec(html);
@@ -304,6 +326,10 @@
 
     var streams = /"streams"\s*:\s*"([^"]+)"/.exec(html);
     info.defaultStreams = streams ? streams[1].replace(/\\\//g, '/') : '';
+
+    // оригинальное название — чтобы отметки просмотра совпадали с карточками Lampa
+    var ot = /<div class="b-post__origtitle"[^>]*>([\s\S]*?)<\/div>/.exec(html);
+    info.origTitle = ot ? unescapeHtml(ot[1].replace(/<[^>]+>/g, '')).split(' / ')[0].trim() : '';
 
     info.translators = [];
     var list = /id="translators-list"[\s\S]*?<\/ul>/.exec(html);
@@ -848,6 +874,7 @@
     '.loki-btn.focus{background:#fff;color:#000}' +
     '.loki-item{display:flex;align-items:center;padding:.8em 1em;margin-bottom:.5em;border-radius:.8em;background:rgba(0,0,0,.3)}' +
     '.loki-item.focus{background:#fff;color:#000}' +
+    '.loki-item__poster{width:2.8em;height:4.2em;object-fit:cover;border-radius:.4em;margin-right:1em;flex-shrink:0;background:rgba(255,255,255,.08)}' +
     '.loki-item__num{font-size:1.6em;width:2.4em;flex-shrink:0;text-align:center;opacity:.7}' +
     '.loki-item__body{flex:1;min-width:0}' +
     '.loki-item__title{font-size:1.2em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
@@ -903,7 +930,8 @@
       scroll.minus();
       root.append(scroll.render());
       scroll.append(body);
-      this.search();
+      if (object.sitePage) self.openPage(object.sitePage);   // пришли из «Loki поиск»
+      else this.search();
       return this.render();
     };
 
@@ -1035,7 +1063,10 @@
 
     function onError(err) {
       loader(false);
-      message('Ошибка: ' + err, function () { self.search(); });
+      message('Ошибка: ' + err, function () {
+        if (object.sitePage) self.openPage(object.sitePage);
+        else self.search();
+      });
     }
 
     // ----- шаги -----
@@ -1066,6 +1097,7 @@
         var info = parseMoviePage(html);
         if (!info) return onError('не удалось разобрать страницу');
         st.info = info;
+        if (object.sitePage && info.origTitle && !movie.original_title) movie.original_title = info.origTitle;
         st.translator = rememberedTranslator(info) || findTranslator(info, info.defaultTranslator) || info.translators[0];
         if (info.series) loadEpisodes();
         else drawMovie();
@@ -1225,6 +1257,179 @@
     }
   }
 
+  // ---------- «Loki поиск»: поиск прямо по сайту (пункт в боковом меню) ----------
+
+  function LokiSearch(object) {
+    var self = this;
+    var scroll = new Lampa.Scroll({ mask: true, over: true });
+    var root = $('<div class="loki-screen-wrap"></div>');
+    var body = $('<div class="loki-screen"></div>');
+    var last = null;
+    var asked = false;
+    var st = { query: '', page: 1, items: [], hasNext: false, error: '' };
+
+    this.create = function () {
+      injectCss();
+      scroll.minus();
+      root.append(scroll.render());
+      scroll.append(body);
+      draw();
+      return this.render();
+    };
+
+    this.render = function () { return root; };
+
+    this.start = function () {
+      try {
+        if (Lampa.Activity.active().activity !== this.activity) return;
+      } catch (e) {}
+      Lampa.Controller.add('content', {
+        toggle: function () {
+          Lampa.Controller.collectionSet(scroll.render());
+          Lampa.Controller.collectionFocus(last || false, scroll.render());
+        },
+        up: function () {
+          if (Navigator.canmove('up')) Navigator.move('up');
+          else Lampa.Controller.toggle('head');
+        },
+        down: function () { Navigator.move('down'); },
+        left: function () {
+          if (Navigator.canmove('left')) Navigator.move('left');
+          else Lampa.Controller.toggle('menu');
+        },
+        right: function () { Navigator.move('right'); },
+        back: function () { Lampa.Activity.backward(); }
+      });
+      Lampa.Controller.toggle('content');
+      // при первом открытии сразу показываем клавиатуру
+      if (!asked && !st.query) { asked = true; askQuery(); }
+    };
+
+    this.pause = function () {};
+    this.stop = function () {};
+    this.destroy = function () {
+      try { scroll.destroy(); } catch (e) {}
+      root.remove();
+    };
+
+    function loader(on) { try { self.activity.loader(on); } catch (e) {} }
+
+    function focusable(el, onEnter) {
+      el.on('hover:focus', function () { last = el[0]; scroll.update(el, true); });
+      el.on('hover:enter', onEnter);
+      return el;
+    }
+
+    function toggle() {
+      try { self.activity.toggle(); } catch (e) { Lampa.Controller.toggle('content'); }
+    }
+
+    function askQuery() {
+      if (!Lampa.Input || !Lampa.Input.edit) return noty('в этой версии Lampa нет экранной клавиатуры');
+      Lampa.Input.edit({ title: 'Loki поиск', value: st.query, free: true, nosave: true }, function (value) {
+        value = String(value || '').trim();
+        if (value && value !== st.query) {
+          st.query = value;
+          st.page = 1;
+          st.items = [];
+          st.hasNext = false;
+          load();
+        } else toggle();
+      });
+    }
+
+    function load() {
+      if (!host()) {
+        st.error = 'укажите адрес сайта: Настройки → Loki → Зеркало';
+        return draw();
+      }
+      loader(true);
+      var path = '/search/?do=search&subaction=search&q=' + encodeURIComponent(st.query) + (st.page > 1 ? '&page=' + st.page : '');
+      var firstNew = st.items.length;
+      getPage(path, function (html) {
+        loader(false);
+        var res = parseFullSearch(html);
+        st.items = st.items.concat(res.items);
+        st.hasNext = res.hasNext && res.items.length > 0;
+        st.error = '';
+        draw(firstNew);
+      }, function (err) {
+        loader(false);
+        st.error = err;
+        draw();
+      });
+    }
+
+    function open(r) {
+      Lampa.Activity.push({
+        url: '',
+        title: 'Loki',
+        component: 'player_by_loki_screen',
+        movie: { title: r.title },
+        sitePage: { url: r.url, title: r.title, info: r.info },
+        page: 1
+      });
+    }
+
+    /** focusIndex — на какой результат поставить фокус (после «Показать ещё» — на первый новый) */
+    function draw(focusIndex) {
+      body.empty();
+      var head = $('<div><div class="loki-screen__head">Loki поиск</div></div>');
+      var sub = st.error ? 'Ошибка: ' + st.error
+        : st.query ? (st.items.length ? 'Найдено: ' + st.items.length + (st.hasNext ? '+' : '') : 'Ничего не найдено')
+        : 'Поиск по сайту из настроек Loki';
+      head.append($('<div class="loki-screen__sub"></div>').text(sub));
+      body.append(head);
+
+      var qbtn = focusable($('<div class="loki-btn selector"></div>').text('🔍 ' + (st.query || 'Введите название')), askQuery);
+      body.append($('<div class="loki-row"></div>').append(qbtn));
+
+      var focusEl = qbtn;
+      st.items.forEach(function (r, i) {
+        var el = $('<div class="loki-item selector">' +
+          (r.poster ? '<img class="loki-item__poster" />' : '<div class="loki-item__num">▶</div>') +
+          '<div class="loki-item__body"><div class="loki-item__title"></div><div class="loki-item__meta"></div></div></div>');
+        if (r.poster) el.find('img').attr('src', r.poster);
+        el.find('.loki-item__title').text(r.title);
+        el.find('.loki-item__meta').text([r.type, r.info].filter(Boolean).join(' · '));
+        focusable(el, function () { open(r); });
+        body.append(el);
+        if (i === focusIndex || (focusIndex === undefined && i === 0)) focusEl = el;
+      });
+
+      if (st.hasNext) {
+        body.append($('<div class="loki-row"></div>').append(focusable($('<div class="loki-btn selector">Показать ещё</div>'), function () {
+          st.page++;
+          load();
+        })));
+      }
+
+      last = focusEl[0];
+      try { Lampa.Layer.update(root[0]); } catch (e) {}
+      toggle();
+    }
+  }
+
+  var SEARCH_SVG = '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path fill="currentColor" d="M15.5 14h-.79l-.28-.27A6.47 6.47 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>';
+
+  function openSearch() {
+    Lampa.Activity.push({ url: '', title: 'Loki поиск', component: 'player_by_loki_search', page: 1 });
+  }
+
+  /** пункт «Loki поиск» в боковом меню Lampa (после встроенного «Поиска», иначе после первого пункта) */
+  function addMenuItem() {
+    try {
+      var list = $('.menu .menu__list').first();
+      if (!list.length || list.find('.loki-menu-search').length) return;
+      var item = $('<li class="menu__item selector loki-menu-search"><div class="menu__ico">' + SEARCH_SVG + '</div><div class="menu__text">Loki поиск</div></li>');
+      item.on('hover:enter', openSearch);
+      var anchor = list.find('[data-action="search"]').first();
+      if (!anchor.length) anchor = list.children('.menu__item').first();
+      if (anchor.length) anchor.after(item);
+      else list.append(item);
+    } catch (e) { log('menu item error', e); }
+  }
+
   function openScreen(movie) {
     Lampa.Activity.push({
       url: '',
@@ -1315,6 +1520,8 @@
   function init() {
     addSettings();
     Lampa.Component.add('player_by_loki_screen', LokiScreen);
+    Lampa.Component.add('player_by_loki_search', LokiSearch);
+    addMenuItem();
     try {
       Lampa.Player.listener.follow('start', onPlayerStart);
       Lampa.Player.listener.follow('start', addPlayerBackButton);
