@@ -1457,7 +1457,7 @@
     var body = $('<div class="loki-screen"></div>');
     var last = null;
     var asked = false;
-    var st = { query: '', page: 1, items: [], hasNext: false, error: '' };
+    var st = { query: object.query || '', page: 1, items: [], hasNext: false, error: '' };
 
     this.create = function () {
       injectCss();
@@ -1496,7 +1496,11 @@
       });
       Lampa.Controller.toggle('content');
       // при первом открытии сразу показываем клавиатуру
-      if (!asked && !st.query) { asked = true; askQuery(); }
+      if (!asked) {
+        asked = true;
+        if (st.query) load();   // пришли из «Ещё» в поиске Lampa — сразу показываем результаты
+        else askQuery();
+      }
     };
 
     this.pause = function () {};
@@ -1554,16 +1558,7 @@
       });
     }
 
-    function open(r) {
-      Lampa.Activity.push({
-        url: '',
-        title: 'Loki',
-        component: 'player_by_loki_screen',
-        movie: { title: r.title },
-        sitePage: { url: r.url, title: r.title, info: r.info },
-        page: 1
-      });
-    }
+    function open(r) { openSitePage(r); }
 
     /** focusIndex — на какой результат поставить фокус (после «Показать ещё» — на первый новый) */
     function draw(focusIndex) {
@@ -1614,8 +1609,73 @@
 
   var SEARCH_SVG = '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path fill="currentColor" d="M15.5 14h-.79l-.28-.27A6.47 6.47 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>';
 
+  /** экран с сеткой результатов и подгрузкой страниц (также запасной вариант для старых версий Lampa) */
+  function openSearchScreen(query) {
+    Lampa.Activity.push({ url: '', title: 'Loki поиск', component: 'player_by_loki_search', query: query || '', page: 1 });
+  }
+
+  function openSitePage(r) {
+    Lampa.Activity.push({
+      url: '',
+      title: 'Loki',
+      component: 'player_by_loki_screen',
+      movie: { title: r.title },
+      sitePage: { url: r.url, title: r.title, info: r.info },
+      page: 1
+    });
+  }
+
+  /**
+   * Источник для родного поиска Lampa (тот же экран, что по лупе: клавиатура, история, карточки).
+   * История запросов — общая с поиском Lampa, сохраняется при выборе результата.
+   */
+  var searchGen = 0;
+  var LOKI_SOURCE = {
+    title: 'Loki',
+    params: { lazy: true, nofound: 'Ничего не найдено', start_typing: 'Введите название фильма или сериала' },
+    search: function (params, oncomplite) {
+      var gen = ++searchGen;
+      var query = params.query;
+      try { query = decodeURIComponent(query); } catch (e) {}
+      if (!host()) {
+        noty('укажите адрес сайта: Настройки → Loki → Зеркало');
+        return oncomplite([]);
+      }
+      getPage('/search/?do=search&subaction=search&q=' + encodeURIComponent(query), function (html) {
+        if (gen !== searchGen) return;
+        var res = parseFullSearch(html);
+        oncomplite(res.items.length ? [{
+          title: 'Loki',
+          results: res.items.map(function (r, i) {
+            var year = (/^(\d{4})/.exec(r.info || '') || [])[1] || '';
+            return { id: 'loki_' + i + '_' + r.url.length, title: r.title, original_title: '', poster: r.poster, img: r.poster, release_date: year, loki: r };
+          })
+        }] : []);
+      }, function (err) {
+        if (gen !== searchGen) return;
+        noty(err);
+        oncomplite([]);
+      });
+    },
+    onCancel: function () { searchGen++; },
+    onSelect: function (params, close) {
+      var r = params.element && params.element.loki;
+      close();   // закрывает поиск и сохраняет запрос в историю
+      if (r) openSitePage(r);
+    },
+    onMore: function (params, close) {
+      var q = params.query;
+      try { q = decodeURIComponent(q); } catch (e) {}
+      close();
+      openSearchScreen(q);
+    }
+  };
+
   function openSearch() {
-    Lampa.Activity.push({ url: '', title: 'Loki поиск', component: 'player_by_loki_search', page: 1 });
+    if (Lampa.Search && Lampa.Search.open) {
+      try { return Lampa.Search.open({ sources: [LOKI_SOURCE] }); } catch (e) { log('native search error', e); }
+    }
+    openSearchScreen('');
   }
 
   /** пункт «Loki поиск» в боковом меню Lampa (после встроенного «Поиска», иначе после первого пункта) */
