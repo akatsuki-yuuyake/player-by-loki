@@ -353,7 +353,31 @@
         camrip: info.camrip || 0, ads: info.ads || 0, director: info.director || 0
       });
     }
+    parseDetails(html, info);
     return info;
+  }
+
+  /** постер, описание, рейтинги и строки таблицы «Дата выхода/Страна/Жанр/Время» — для шапки экрана */
+  function parseDetails(html, info) {
+    var strip = function (x) { return unescapeHtml(String(x || '').replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').replace(/\s+,/g, ',').trim(); };
+    var m = /<div class="b-sidecover">[\s\S]*?<img[^>]+src="([^"]+)"/.exec(html);
+    info.poster = m ? m[1] : '';
+    m = /<div class="b-post__description_text">([\s\S]*?)<\/div>/.exec(html);
+    info.description = m ? strip(m[1]) : '';
+    m = /b-post__info_rates imdb[\s\S]*?<span class="bold">([\d.,]+)<\/span>/.exec(html);
+    info.imdb = m ? m[1] : '';
+    m = /b-post__info_rates kp[\s\S]*?<span class="bold">([\d.,]+)<\/span>/.exec(html);
+    info.kp = m ? m[1] : '';
+    var row = function (label) {
+      var r = new RegExp('<h2>' + label + '<\\/h2>:?<\\/td>\\s*<td[^>]*>([\\s\\S]*?)<\\/td>').exec(html);
+      return r ? strip(r[1]) : '';
+    };
+    var date = row('Дата выхода');
+    var y = /(\d{4})/.exec(date);
+    info.year = y ? y[1] : '';
+    info.country = row('Страна');
+    info.genre = row('Жанр');
+    info.duration = row('Время');
   }
 
   function parseEpisodes(html) {
@@ -865,25 +889,70 @@
 
   // ---------- экран со списком серий ----------
 
+  var ACCENT = '#5fd68a';
   var CSS = '' +
-    '.loki-screen{padding:1.5em 2.5em 3em}' +
-    '.loki-screen__head{font-size:1.8em;font-weight:600;margin-bottom:.2em}' +
-    '.loki-screen__sub{opacity:.6;margin-bottom:1.2em}' +
-    '.loki-row{display:flex;flex-wrap:wrap;margin-bottom:1.2em}' +
-    '.loki-btn{padding:.55em 1.2em;border-radius:1em;background:rgba(255,255,255,.12);margin:0 .7em .5em 0}' +
-    '.loki-btn.focus{background:#fff;color:#000}' +
-    '.loki-item{display:flex;align-items:center;padding:.8em 1em;margin-bottom:.5em;border-radius:.8em;background:rgba(0,0,0,.3)}' +
-    '.loki-item.focus{background:#fff;color:#000}' +
-    '.loki-item__poster{width:2.8em;height:4.2em;object-fit:cover;border-radius:.4em;margin-right:1em;flex-shrink:0;background:rgba(255,255,255,.08)}' +
-    '.loki-item__num{font-size:1.6em;width:2.4em;flex-shrink:0;text-align:center;opacity:.7}' +
+    // фон: постер под тёмным градиентом (без blur — на слабых ТВ-приставках он тормозит прокрутку)
+    '.loki-screen-wrap{position:relative}' +
+    '.loki-bg{position:absolute;top:0;left:0;right:0;bottom:0;background-size:cover;background-position:center 20%;opacity:0;transition:opacity .6s}' +
+    '.loki-bg.on{opacity:.3}' +
+    '.loki-bg:after{content:"";position:absolute;top:0;left:0;right:0;bottom:0;background:linear-gradient(90deg,rgba(18,18,22,.97) 0%,rgba(18,18,22,.85) 45%,rgba(18,18,22,.7) 100%),linear-gradient(0deg,rgba(18,18,22,1) 0%,rgba(18,18,22,0) 60%)}' +
+    '.loki-screen-wrap>.scroll{position:relative;z-index:1}' +
+    '.loki-screen{padding:1.5em 3em 4em}' +
+    '.loki-screen__head{font-size:2em;font-weight:700;margin-bottom:.25em}' +
+    '.loki-screen__sub{opacity:.6;margin-bottom:1.4em}' +
+    // шапка фильма
+    '.loki-hero{display:flex;align-items:flex-start;margin-bottom:1.8em}' +
+    '.loki-hero__poster{width:9.5em;height:14.2em;border-radius:1em;background:rgba(255,255,255,.06) center/cover no-repeat;flex-shrink:0;margin-right:2em;box-shadow:0 .8em 2em rgba(0,0,0,.5)}' +
+    '.loki-hero__body{flex:1;min-width:0;padding-top:.3em}' +
+    '.loki-hero__title{font-size:2.3em;font-weight:700;line-height:1.15}' +
+    '.loki-hero__orig{opacity:.55;margin-top:.3em;font-size:1.05em}' +
+    '.loki-hero__meta{display:flex;flex-wrap:wrap;align-items:center;margin-top:.9em}' +
+    '.loki-chip{padding:.25em .7em;border-radius:.5em;background:rgba(255,255,255,.1);margin:0 .5em .5em 0;font-size:.95em;white-space:nowrap}' +
+    '.loki-chip--imdb{background:#f5c518;color:#000;font-weight:700}' +
+    '.loki-chip--kp{background:#ff6a00;color:#fff;font-weight:700}' +
+    '.loki-hero__descr{margin-top:.6em;opacity:.8;line-height:1.45;max-width:46em;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}' +
+    // кнопки
+    '.loki-row{display:flex;flex-wrap:wrap;margin-bottom:1.4em}' +
+    '.loki-btn{padding:.6em 1.3em;border-radius:2em;background:rgba(255,255,255,.1);margin:0 .8em .6em 0;transition:transform .15s,background .15s}' +
+    '.loki-btn.focus{background:#fff;color:#000;transform:scale(1.06);box-shadow:0 .4em 1.2em rgba(0,0,0,.4)}' +
+    // строки серий
+    '.loki-item{display:flex;align-items:center;max-width:62em;padding:.85em 1.2em;margin-bottom:.6em;border-radius:1em;background:rgba(255,255,255,.05);transition:transform .15s,background .15s}' +
+    '.loki-item.focus{background:#fff;color:#000;transform:scale(1.015);box-shadow:0 .5em 1.4em rgba(0,0,0,.45)}' +
+    '.loki-item__num{width:2.3em;height:2.3em;line-height:2.3em;border-radius:50%;background:rgba(255,255,255,.1);text-align:center;font-weight:700;flex-shrink:0;margin-right:1.1em}' +
+    '.loki-item.focus .loki-item__num{background:rgba(0,0,0,.1)}' +
     '.loki-item__body{flex:1;min-width:0}' +
     '.loki-item__title{font-size:1.2em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
     '.loki-item__meta{font-size:.9em;opacity:.6;margin-top:.2em}' +
-    '.loki-item__bar{height:.25em;background:rgba(255,255,255,.15);border-radius:.2em;margin-top:.45em;overflow:hidden}' +
-    '.loki-item.focus .loki-item__bar{background:rgba(0,0,0,.15)}' +
-    '.loki-item__bar>div{height:100%;background:#3fa9f5}' +
-    '.loki-item--watched .loki-item__num{color:#4caf50;opacity:1}' +
-    '.loki-msg{padding:3em 1em;text-align:center;opacity:.7;font-size:1.2em}';
+    '.loki-item__meta:empty{display:none}' +
+    '.loki-item__bar{height:.28em;background:rgba(255,255,255,.12);border-radius:.2em;margin-top:.5em;overflow:hidden}' +
+    '.loki-item.focus .loki-item__bar{background:rgba(0,0,0,.12)}' +
+    '.loki-item__bar>div{height:100%;background:' + ACCENT + '}' +
+    '.loki-item--watched .loki-item__num{background:' + ACCENT + ';color:#000}' +
+    '.loki-item--watched .loki-item__title{opacity:.6}' +
+    '.loki-item--watched.focus .loki-item__title{opacity:1}' +
+    '.loki-item--primary{background:' + ACCENT + ';color:#000;max-width:30em}' +
+    '.loki-item--primary .loki-item__num{background:rgba(0,0,0,.15)}' +
+    '.loki-item--primary .loki-item__title{font-weight:700}' +
+    '.loki-item--primary .loki-item__bar{background:rgba(0,0,0,.15)}' +
+    '.loki-item--primary .loki-item__bar>div{background:#000}' +
+    '.loki-item__poster{width:2.8em;height:4.2em;object-fit:cover;border-radius:.4em;margin-right:1em;flex-shrink:0;background:rgba(255,255,255,.08)}' +
+    '.loki-msg{padding:3em 1em;text-align:center;opacity:.7;font-size:1.2em}' +
+    // поиск: строка запроса и сетка постеров
+    '.loki-searchbar{display:flex;align-items:center;padding:.8em 1.3em;border-radius:1em;background:rgba(255,255,255,.08);margin-bottom:1.6em;max-width:40em;font-size:1.15em;transition:transform .15s,background .15s}' +
+    '.loki-searchbar svg{width:1.3em;height:1.3em;margin-right:.8em;opacity:.7;flex-shrink:0}' +
+    '.loki-searchbar--empty span{opacity:.5}' +
+    '.loki-searchbar.focus{background:#fff;color:#000;transform:scale(1.02)}' +
+    '.loki-searchbar.focus span{opacity:1}' +
+    '.loki-grid{display:flex;flex-wrap:wrap;margin:0 -.6em}' +
+    '.loki-card{width:10.2em;margin:0 .6em 1.4em;transition:transform .15s}' +
+    '.loki-card__img{position:relative;height:15.3em;border-radius:.9em;background:rgba(255,255,255,.06) center/cover no-repeat;overflow:hidden}' +
+    '.loki-card__type{position:absolute;left:.5em;top:.5em;padding:.15em .5em;border-radius:.4em;background:rgba(0,0,0,.65);font-size:.75em}' +
+    '.loki-card__title{margin-top:.55em;font-size:1em;line-height:1.25;max-height:2.5em;overflow:hidden}' +
+    '.loki-card__meta{font-size:.8em;opacity:.55;margin-top:.25em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
+    '.loki-card.focus{transform:scale(1.07)}' +
+    '.loki-card.focus .loki-card__img{box-shadow:0 0 0 .2em #fff,0 .8em 2em rgba(0,0,0,.6)}' +
+    '.loki-card--more .loki-card__img{display:flex;align-items:center;justify-content:center;font-size:1.3em;background:rgba(255,255,255,.08)}' +
+    '.loki-card--more.focus .loki-card__img{background:#fff;color:#000}';
 
   function injectCss() {
     if (document.getElementById('player-by-loki-css')) return;
@@ -915,6 +984,7 @@
     var title = movie.title || movie.name || movie.original_title || movie.original_name || '';
     var scroll = new Lampa.Scroll({ mask: true, over: true });
     var root = $('<div class="loki-screen-wrap"></div>');
+    var bg = $('<div class="loki-bg"></div>');   // постер фоном; не .selector — на навигацию не влияет
     var body = $('<div class="loki-screen"></div>');
     var last = null;          // элемент в фокусе
     var progressRows = [];    // [{el, season, episode}] — для обновления после просмотра
@@ -928,6 +998,7 @@
       currentMovie = movie;
       // без этого Lampa не задаёт скроллу высоту (экран минус шапка) и длинный список уходит за экран
       scroll.minus();
+      root.append(bg);
       root.append(scroll.render());
       scroll.append(body);
       if (object.sitePage) self.openPage(object.sitePage);   // пришли из «Loki поиск»
@@ -1010,6 +1081,34 @@
 
     function btn(text, onEnter) {
       return focusable($('<div class="loki-btn selector">' + esc(text) + '</div>'), onEnter);
+    }
+
+    /** шапка фильма: постер, названия, рейтинги, год/страна/жанр, описание. Без .selector — только оформление. */
+    function hero(extraChip) {
+      var i = st.info || {};
+      var el = $('<div class="loki-hero"><div class="loki-hero__poster"></div><div class="loki-hero__body">' +
+        '<div class="loki-hero__title"></div><div class="loki-hero__orig"></div>' +
+        '<div class="loki-hero__meta"></div><div class="loki-hero__descr"></div></div></div>');
+      if (i.poster) {
+        el.find('.loki-hero__poster').css('background-image', 'url("' + i.poster + '")');
+        bg.css('background-image', 'url("' + i.poster + '")').addClass('on');
+      } else el.find('.loki-hero__poster').remove();
+      el.find('.loki-hero__title').text(title || (st.page && st.page.title) || '');
+      if (i.origTitle && i.origTitle !== title) el.find('.loki-hero__orig').text(i.origTitle);
+      else el.find('.loki-hero__orig').remove();
+      var meta = el.find('.loki-hero__meta');
+      var chip = function (text, cls) { if (text) meta.append($('<span class="loki-chip"></span>').addClass(cls || '').text(text)); };
+      chip(i.imdb && 'IMDb ' + i.imdb, 'loki-chip--imdb');
+      chip(i.kp && 'КП ' + i.kp, 'loki-chip--kp');
+      chip(i.year);
+      chip(i.country && i.country.split(',')[0]);
+      chip(i.genre && i.genre.split(',').slice(0, 2).join(', '));
+      chip(i.duration);
+      chip(extraChip);
+      if (!meta.children().length && st.page) chip(st.page.info);
+      if (i.description) el.find('.loki-hero__descr').text(i.description);
+      else el.find('.loki-hero__descr').remove();
+      return el;
     }
 
     function row(buttons) {
@@ -1158,10 +1257,12 @@
       var el = itemEl('▶', 'Смотреть', '', function () {
         playMovie(st.page, st.info, st.translator, title);
       });
-      var blocks = [head(st.page.title + ' ' + st.page.info), topButtons(null, drawMovie), el];
+      el.addClass('loki-item--primary');
+      var blocks = [hero(), el, topButtons(null, drawMovie)];
       redraw(blocks, el);
       progressRows.push({ el: el, num: '▶' });
       applyProgress(el, p, '▶');
+      if (p.percent > 0 && p.percent < 90) el.find('.loki-item__title').text('Продолжить');
     }
 
     // сериал
@@ -1206,7 +1307,9 @@
     function drawEpisodes() {
       var list = st.eps.seasons[st.season];
       var seasonBtn = st.eps.order.length > 1 ? [btn('Сезон ' + st.season + ' ▾', pickSeason)] : [];
-      var blocks = [head(list.length + ' серий'), topButtons(seasonBtn, drawEpisodes)];
+      var n = list.length, n10 = n % 10, n100 = n % 100;
+      var word = n10 === 1 && n100 !== 11 ? 'серия' : n10 >= 2 && n10 <= 4 && (n100 < 10 || n100 >= 20) ? 'серии' : 'серий';
+      var blocks = [hero(n + ' ' + word), topButtons(seasonBtn, drawEpisodes)];
       var focusEl = null;
       var lastWatched = -1;
       var els = [];
@@ -1381,28 +1484,36 @@
       head.append($('<div class="loki-screen__sub"></div>').text(sub));
       body.append(head);
 
-      var qbtn = focusable($('<div class="loki-btn selector"></div>').text('🔍 ' + (st.query || 'Введите название')), askQuery);
-      body.append($('<div class="loki-row"></div>').append(qbtn));
+      var qbtn = $('<div class="loki-searchbar selector">' + SEARCH_SVG + '<span></span></div>');
+      qbtn.find('span').text(st.query || 'Введите название');
+      if (!st.query) qbtn.addClass('loki-searchbar--empty');
+      focusable(qbtn, askQuery);
+      body.append(qbtn);
 
+      var grid = $('<div class="loki-grid"></div>');
       var focusEl = qbtn;
       st.items.forEach(function (r, i) {
-        var el = $('<div class="loki-item selector">' +
-          (r.poster ? '<img class="loki-item__poster" />' : '<div class="loki-item__num">▶</div>') +
-          '<div class="loki-item__body"><div class="loki-item__title"></div><div class="loki-item__meta"></div></div></div>');
-        if (r.poster) el.find('img').attr('src', r.poster);
-        el.find('.loki-item__title').text(r.title);
-        el.find('.loki-item__meta').text([r.type, r.info].filter(Boolean).join(' · '));
+        var el = $('<div class="loki-card selector"><div class="loki-card__img"></div>' +
+          '<div class="loki-card__title"></div><div class="loki-card__meta"></div></div>');
+        if (r.poster) el.find('.loki-card__img').css('background-image', 'url("' + r.poster + '")');
+        if (r.type) el.find('.loki-card__img').append($('<div class="loki-card__type"></div>').text(r.type));
+        el.find('.loki-card__title').text(r.title);
+        // «2024, США, Фантастика» → «2024 · Фантастика»
+        var parts = String(r.info || '').split(',').map(function (x) { return x.trim(); }).filter(Boolean);
+        el.find('.loki-card__meta').text(parts.length > 2 ? parts[0] + ' · ' + parts[parts.length - 1] : parts.join(' · '));
         focusable(el, function () { open(r); });
-        body.append(el);
+        grid.append(el);
         if (i === focusIndex || (focusIndex === undefined && i === 0)) focusEl = el;
       });
 
       if (st.hasNext) {
-        body.append($('<div class="loki-row"></div>').append(focusable($('<div class="loki-btn selector">Показать ещё</div>'), function () {
+        grid.append(focusable($('<div class="loki-card loki-card--more selector"><div class="loki-card__img">Ещё →</div>' +
+          '<div class="loki-card__title">Показать ещё</div></div>'), function () {
           st.page++;
           load();
-        })));
+        }));
       }
+      if (st.items.length) body.append(grid);
 
       last = focusEl[0];
       try { Lampa.Layer.update(root[0]); } catch (e) {}
