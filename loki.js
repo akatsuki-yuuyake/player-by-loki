@@ -1011,6 +1011,34 @@
     return { percent: v.percent || 0, time: v.time || 0, duration: v.duration || 0 };
   }
 
+  /**
+   * Стрелка вверх/вниз, когда прямо над/под элементом ничего нет (например, с 4-й серии вверх,
+   * а кнопки стоят только слева): переходим на ближайший по горизонтали элемент соседней строки,
+   * а не в шапку Lampa. Возвращает true, если переход сделан.
+   */
+  function jumpRow(container, current, dir) {
+    if (!current || !current.getBoundingClientRect) return false;
+    var cur = current.getBoundingClientRect();
+    var cx = cur.left + cur.width / 2;
+    var best = null, bestEdge = null, bestDx = 0;
+    $(container).find('.selector').each(function () {
+      if (this === current) return;
+      var r = this.getBoundingClientRect();
+      if (!r.width && !r.height) return; // скрытый
+      var edge;
+      if (dir === 'up') { if (r.bottom > cur.top + 2) return; edge = r.bottom; }
+      else { if (r.top < cur.bottom - 2) return; edge = -r.top; }
+      var dx = Math.abs(r.left + r.width / 2 - cx);
+      // сначала ближайшая строка, внутри неё — ближайший по горизонтали
+      if (best === null || edge > bestEdge + 2 || (Math.abs(edge - bestEdge) <= 2 && dx < bestDx)) {
+        best = this; bestEdge = edge; bestDx = dx;
+      }
+    });
+    if (!best) return false;
+    Lampa.Controller.collectionFocus(best, container);
+    return true;
+  }
+
   function LokiScreen(object) {
     var self = this;
     var movie = object.movie || {};
@@ -1055,9 +1083,12 @@
         },
         up: function () {
           if (Navigator.canmove('up')) Navigator.move('up');
-          else Lampa.Controller.toggle('head');
+          else if (!jumpRow(scroll.render(), last, 'up')) Lampa.Controller.toggle('head');
         },
-        down: function () { Navigator.move('down'); },
+        down: function () {
+          if (Navigator.canmove('down')) Navigator.move('down');
+          else jumpRow(scroll.render(), last, 'down');
+        },
         left: function () {
           if (Navigator.canmove('left')) Navigator.move('left');
           else Lampa.Controller.toggle('menu');
@@ -1450,9 +1481,12 @@
         },
         up: function () {
           if (Navigator.canmove('up')) Navigator.move('up');
-          else Lampa.Controller.toggle('head');
+          else if (!jumpRow(scroll.render(), last, 'up')) Lampa.Controller.toggle('head');
         },
-        down: function () { Navigator.move('down'); },
+        down: function () {
+          if (Navigator.canmove('down')) Navigator.move('down');
+          else jumpRow(scroll.render(), last, 'down');
+        },
         left: function () {
           if (Navigator.canmove('left')) Navigator.move('left');
           else Lampa.Controller.toggle('menu');
