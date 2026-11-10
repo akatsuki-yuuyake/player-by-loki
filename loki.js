@@ -1784,6 +1784,8 @@
     Lampa.Component.add('player_by_loki_screen', LokiScreen);
     Lampa.Component.add('player_by_loki_search', LokiSearch);
     addMenuItem();
+    // вкладка «Loki» и в обычном поиске Lampa (лупа в шапке); ищет, только когда вкладка открыта (lazy)
+    try { if (Lampa.Search && Lampa.Search.addSource) Lampa.Search.addSource(LOKI_SOURCE); } catch (e) { log('addSource error', e); }
     try {
       Lampa.Player.listener.follow('start', onPlayerStart);
       Lampa.Player.listener.follow('start', addPlayerBackButton);
