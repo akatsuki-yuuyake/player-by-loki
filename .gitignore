@@ -1,0 +1,5 @@
+# сессия сайта (cookie входа) — не коммитить
+*cookies*.txt
+__pycache__/
+*.pyc
+.DS_Store
