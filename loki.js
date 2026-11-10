@@ -474,6 +474,32 @@
     return map;
   }
 
+  /** картинка TMDB через Lampa (учитывает её прокси картинок), иначе напрямую */
+  function tmdbImg(path, size) {
+    if (!path) return '';
+    try { if (Lampa.Api && Lampa.Api.img) return Lampa.Api.img(path, size); } catch (e) {}
+    return 'https://image.tmdb.org/t/p/' + size + path;
+  }
+
+  /** серии сезона из TMDB (названия, кадры) через встроенный клиент Lampa; только для карточек Lampa */
+  function tmdbSeason(movie, season, cb) {
+    var done = false;
+    var finish = function (eps) { if (!done) { done = true; cb(eps || []); } };
+    try {
+      if (!movie.id || !(movie.name || movie.original_name) || !Lampa.Api || !Lampa.Api.seasons) return finish([]);
+      Lampa.Api.seasons(movie, [parseInt(season, 10)], function (res) {
+        var x = res && (res[season] || res[parseInt(season, 10)]);
+        finish(x && x.episodes);
+      });
+    } catch (e) { finish([]); }
+  }
+
+  /** фон приложения Lampa (тот же слой, что на карточке фильма) */
+  function setBackground(url) {
+    if (!url) return;
+    try { Lampa.Background.change(url); } catch (e) {}
+  }
+
   /** отметка прогресса Lampa (тот же хэш, что у встроенных онлайн-источников) */
   function timeline(season, episode) {
     try {
@@ -891,29 +917,23 @@
 
   var ACCENT = '#5fd68a';
   var CSS = '' +
-    // фон: постер под тёмным градиентом (без blur — на слабых ТВ-приставках он тормозит прокрутку)
-    '.loki-screen-wrap{position:relative}' +
-    '.loki-bg{position:absolute;top:0;left:0;right:0;bottom:0;background-size:cover;background-position:center 20%;opacity:0;transition:opacity .6s}' +
-    '.loki-bg.on{opacity:.3}' +
-    '.loki-bg:after{content:"";position:absolute;top:0;left:0;right:0;bottom:0;background:linear-gradient(90deg,rgba(18,18,22,.97) 0%,rgba(18,18,22,.85) 45%,rgba(18,18,22,.7) 100%),linear-gradient(0deg,rgba(18,18,22,1) 0%,rgba(18,18,22,0) 60%)}' +
-    '.loki-screen-wrap>.scroll{position:relative;z-index:1}' +
-    '.loki-screen{padding:1.5em 3em 4em}' +
+    '.loki-screen{padding:2em 3.5em 4em}' +
     '.loki-screen__head{font-size:2em;font-weight:700;margin-bottom:.25em}' +
     '.loki-screen__sub{opacity:.6;margin-bottom:1.4em}' +
     // шапка фильма
-    '.loki-hero{display:flex;align-items:flex-start;margin-bottom:1.8em}' +
-    '.loki-hero__poster{width:9.5em;height:14.2em;border-radius:1em;background:rgba(255,255,255,.06) center/cover no-repeat;flex-shrink:0;margin-right:2em;box-shadow:0 .8em 2em rgba(0,0,0,.5)}' +
+    '.loki-hero{display:flex;align-items:flex-end;margin-bottom:2em;min-height:19em}' +
+    '.loki-hero__poster{width:13em;height:19.5em;border-radius:1.2em;background:rgba(255,255,255,.06) center/cover no-repeat;flex-shrink:0;margin-right:2.5em;box-shadow:0 .8em 2em rgba(0,0,0,.5)}' +
     '.loki-hero__body{flex:1;min-width:0;padding-top:.3em}' +
-    '.loki-hero__title{font-size:2.3em;font-weight:700;line-height:1.15}' +
-    '.loki-hero__orig{opacity:.55;margin-top:.3em;font-size:1.05em}' +
+    '.loki-hero__title{font-size:3.2em;font-weight:800;line-height:1.1;text-shadow:0 .1em .4em rgba(0,0,0,.5)}' +
+    '.loki-hero__orig{opacity:.6;margin-top:.35em;font-size:1.2em}' +
     '.loki-hero__meta{display:flex;flex-wrap:wrap;align-items:center;margin-top:.9em}' +
-    '.loki-chip{padding:.25em .7em;border-radius:.5em;background:rgba(255,255,255,.1);margin:0 .5em .5em 0;font-size:.95em;white-space:nowrap}' +
+    '.loki-chip{padding:.3em .8em;border-radius:.5em;background:rgba(0,0,0,.35);margin:0 .6em .6em 0;font-size:1.05em;white-space:nowrap}' +
     '.loki-chip--imdb{background:#f5c518;color:#000;font-weight:700}' +
     '.loki-chip--kp{background:#ff6a00;color:#fff;font-weight:700}' +
-    '.loki-hero__descr{margin-top:.6em;opacity:.8;line-height:1.45;max-width:46em;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}' +
+    '.loki-hero__descr{margin-top:.6em;opacity:.85;font-size:1.1em;line-height:1.5;max-width:52em;text-shadow:0 .05em .3em rgba(0,0,0,.6);display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}' +
     // кнопки
-    '.loki-row{display:flex;flex-wrap:wrap;margin-bottom:1.4em}' +
-    '.loki-btn{padding:.6em 1.3em;border-radius:2em;background:rgba(255,255,255,.1);margin:0 .8em .6em 0;transition:transform .15s,background .15s}' +
+    '.loki-row{display:flex;flex-wrap:wrap;margin-bottom:1.6em}' +
+    '.loki-btn{padding:.7em 1.5em;border-radius:2em;font-size:1.1em;background:rgba(0,0,0,.4);margin:0 .8em .6em 0;transition:transform .15s,background .15s}' +
     '.loki-btn.focus{background:#fff;color:#000;transform:scale(1.06);box-shadow:0 .4em 1.2em rgba(0,0,0,.4)}' +
     // строки серий
     '.loki-item{display:flex;align-items:center;max-width:62em;padding:.85em 1.2em;margin-bottom:.6em;border-radius:1em;background:rgba(255,255,255,.05);transition:transform .15s,background .15s}' +
@@ -930,12 +950,25 @@
     '.loki-item--watched .loki-item__num{background:' + ACCENT + ';color:#000}' +
     '.loki-item--watched .loki-item__title{opacity:.6}' +
     '.loki-item--watched.focus .loki-item__title{opacity:1}' +
-    '.loki-item--primary{background:' + ACCENT + ';color:#000;max-width:30em}' +
+    '.loki-item--primary{background:' + ACCENT + ';color:#000;max-width:24em;font-size:1.15em;padding:1em 1.4em}' +
     '.loki-item--primary .loki-item__num{background:rgba(0,0,0,.15)}' +
     '.loki-item--primary .loki-item__title{font-weight:700}' +
     '.loki-item--primary .loki-item__bar{background:rgba(0,0,0,.15)}' +
     '.loki-item--primary .loki-item__bar>div{background:#000}' +
     '.loki-item__poster{width:2.8em;height:4.2em;object-fit:cover;border-radius:.4em;margin-right:1em;flex-shrink:0;background:rgba(255,255,255,.08)}' +
+    // карточки серий
+    '.loki-eps{display:flex;flex-wrap:wrap;margin:0 -.6em}' +
+    '.loki-ep{width:17em;margin:0 .6em 1.5em;transition:transform .15s}' +
+    '.loki-ep__img{position:relative;height:9.6em;border-radius:.9em;overflow:hidden;background:rgba(0,0,0,.4) center/cover no-repeat}' +
+    '.loki-ep .loki-item__num{position:absolute;left:.6em;top:.6em;width:auto;min-width:2.2em;height:2.2em;line-height:2.2em;padding:0 .5em;border-radius:1.1em;background:rgba(0,0,0,.6);color:#fff;text-align:center;font-weight:700;margin:0}' +
+    '.loki-ep__img:not(.loki-ep__img--still) .loki-item__num{left:50%;top:50%;transform:translate(-50%,-50%);font-size:2.2em;background:none;opacity:.5}' +
+    '.loki-ep.loki-item--watched .loki-item__num{background:' + ACCENT + ';color:#000;opacity:1;font-size:1em;left:.6em;top:.6em;transform:none}' +
+    '.loki-ep .loki-item__bar{position:absolute;left:0;right:0;bottom:0;margin:0;height:.3em;border-radius:0;background:rgba(0,0,0,.5)}' +
+    '.loki-ep .loki-item__title{margin-top:.6em;font-size:1.05em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
+    '.loki-ep .loki-item__meta{font-size:.85em;opacity:.55;margin-top:.2em}' +
+    '.loki-ep.loki-item--watched .loki-ep__img{opacity:.55}' +
+    '.loki-ep.focus{transform:scale(1.06)}' +
+    '.loki-ep.focus .loki-ep__img{opacity:1;box-shadow:0 0 0 .2em #fff,0 .8em 2em rgba(0,0,0,.6)}' +
     '.loki-msg{padding:3em 1em;text-align:center;opacity:.7;font-size:1.2em}' +
     // поиск: строка запроса и сетка постеров
     '.loki-searchbar{display:flex;align-items:center;padding:.8em 1.3em;border-radius:1em;background:rgba(255,255,255,.08);margin-bottom:1.6em;max-width:40em;font-size:1.15em;transition:transform .15s,background .15s}' +
@@ -984,7 +1017,6 @@
     var title = movie.title || movie.name || movie.original_title || movie.original_name || '';
     var scroll = new Lampa.Scroll({ mask: true, over: true });
     var root = $('<div class="loki-screen-wrap"></div>');
-    var bg = $('<div class="loki-bg"></div>');   // постер фоном; не .selector — на навигацию не влияет
     var body = $('<div class="loki-screen"></div>');
     var last = null;          // элемент в фокусе
     var progressRows = [];    // [{el, season, episode}] — для обновления после просмотра
@@ -998,7 +1030,6 @@
       currentMovie = movie;
       // без этого Lampa не задаёт скроллу высоту (экран минус шапка) и длинный список уходит за экран
       scroll.minus();
-      root.append(bg);
       root.append(scroll.render());
       scroll.append(body);
       if (object.sitePage) self.openPage(object.sitePage);   // пришли из «Loki поиск»
@@ -1089,10 +1120,10 @@
       var el = $('<div class="loki-hero"><div class="loki-hero__poster"></div><div class="loki-hero__body">' +
         '<div class="loki-hero__title"></div><div class="loki-hero__orig"></div>' +
         '<div class="loki-hero__meta"></div><div class="loki-hero__descr"></div></div></div>');
-      if (i.poster) {
-        el.find('.loki-hero__poster').css('background-image', 'url("' + i.poster + '")');
-        bg.css('background-image', 'url("' + i.poster + '")').addClass('on');
-      } else el.find('.loki-hero__poster').remove();
+      var poster = tmdbImg(movie.poster_path, 'w500') || i.poster;
+      if (poster) el.find('.loki-hero__poster').css('background-image', 'url("' + poster + '")');
+      else el.find('.loki-hero__poster').remove();
+      setBackground(tmdbImg(movie.backdrop_path, 'w1280') || i.poster);
       el.find('.loki-hero__title').text(title || (st.page && st.page.title) || '');
       if (i.origTitle && i.origTitle !== title) el.find('.loki-hero__orig').text(i.origTitle);
       else el.find('.loki-hero__orig').remove();
@@ -1309,16 +1340,17 @@
       var seasonBtn = st.eps.order.length > 1 ? [btn('Сезон ' + st.season + ' ▾', pickSeason)] : [];
       var n = list.length, n10 = n % 10, n100 = n % 100;
       var word = n10 === 1 && n100 !== 11 ? 'серия' : n10 >= 2 && n10 <= 4 && (n100 < 10 || n100 >= 20) ? 'серии' : 'серий';
-      var blocks = [hero(n + ' ' + word), topButtons(seasonBtn, drawEpisodes)];
+      var grid = $('<div class="loki-eps"></div>');
+      var blocks = [hero(n + ' ' + word), topButtons(seasonBtn, drawEpisodes), grid];
       var focusEl = null;
       var lastWatched = -1;
       var els = [];
 
       for (var i = 0; i < list.length; i++) {
         (function (e, idx) {
-          var el = itemEl(e.episode, e.title, '', function () { playEpisode(list, idx); });
+          var el = epCard(e, function () { playEpisode(list, idx); });
           els.push(el);
-          blocks.push(el);
+          grid.append(el);
           var p = progressOf(e.season, e.episode);
           if (p.percent > 0) lastWatched = idx;
         })(list[i], i);
@@ -1338,6 +1370,31 @@
         progressRows.push({ el: els[k], season: list[k].season, episode: list[k].episode, num: list[k].episode });
       }
       refreshProgress();
+
+      // кадры и названия серий из TMDB (если фильм открыт с карточки Lampa)
+      var season = st.season;
+      tmdbSeason(movie, season, function (tmdbEps) {
+        if (season !== st.season || !tmdbEps.length) return;
+        for (var a = 0; a < list.length; a++) {
+          for (var b = 0; b < tmdbEps.length; b++) {
+            var t = tmdbEps[b];
+            if (String(t.episode_number) !== String(list[a].episode)) continue;
+            if (t.still_path) els[a].find('.loki-ep__img').css('background-image', 'url("' + tmdbImg(t.still_path, 'w300') + '")').addClass('loki-ep__img--still');
+            if (t.name && !/^(Эпизод|Episode|Серия)\s*\d+$/i.test(t.name)) els[a].find('.loki-item__title').text(list[a].episode + '. ' + t.name);
+            break;
+          }
+        }
+      });
+    }
+
+    /** карточка серии: кадр (или номер), отметка ✓, полоска прогресса; классы loki-item__* — для applyProgress */
+    function epCard(e, onEnter) {
+      var el = $('<div class="loki-ep selector"><div class="loki-ep__img">' +
+        '<div class="loki-item__num"></div><div class="loki-item__bar" style="display:none"><div></div></div></div>' +
+        '<div class="loki-item__title"></div><div class="loki-item__meta"></div></div>');
+      el.find('.loki-item__num').text(e.episode);
+      el.find('.loki-item__title').text(e.title);
+      return focusable(el, onEnter);
     }
 
     function playEpisode(list, idx) {
