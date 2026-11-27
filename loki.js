@@ -82,9 +82,24 @@
       }
       onOk(data);
     }, function (a, c) {
-      log('request error', url, a && a.status, c);
-      onErr('сетевая ошибка' + (a && a.status ? ' (HTTP ' + a.status + ')' : ' — нужна официальная Lampa для Android'));
+      log('request error', url, a && a.status, c, a);
+      onErr(netErrorText(url, a, c));
     }, post ? encodeForm(post) : false, { dataType: 'text', headers: headers, returnHeaders: true });
+  }
+
+  /** Текст сетевой ошибки с подробностями: по скриншоту должно быть видно причину. */
+  function netErrorText(url, a, c) {
+    var hostName = (/^https?:\/\/([^\/?#]+)/.exec(url) || [])[1] || url;
+    var status = a && a.status;
+    var details = [];
+    if (c && typeof c === 'string') details.push(c);
+    var body = a && (a.responseText || a.statusText || a.message);
+    if (body && typeof body === 'string') details.push(body.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120));
+    var hint = status
+      ? 'сайт ответил ошибкой'
+      : 'сайт не отвечает: проверьте «Зеркало» или откройте этот адрес на другом устройстве в той же сети; если не открывается — попробуйте другое зеркало или VPN';
+    return 'сетевая ошибка ' + hostName + (status ? ' (HTTP ' + status + ')' : '') +
+      (details.length ? ' [' + details.join(' | ') + ']' : '') + ' — ' + hint;
   }
 
   /**
